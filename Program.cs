@@ -37,7 +37,8 @@ namespace Dungeon
 {
     using System;
     using System.Collections.Generic;
-    
+    using System.Security.Cryptography.X509Certificates;
+
     class Program
     {
         // Function for graph representation
@@ -46,51 +47,60 @@ namespace Dungeon
             adj[u].Add(new KeyValuePair<int, int>(v, w));
         }
 
-        static void displayAdjList(List<List<KeyValuePair<int, int>>> adj)
+        static void displayAdjList(Dictionary<int,List<int>> adj)
         {
-            for (int i = 0; i < adj.Count; i++)
+            
+            foreach (var j in adj.Keys)
             {
-                Console.Write(i + ": "); 
-                foreach (var j in adj[i])
-                {
-                    Console.Write("{" + j.Key + ", " + j.Value + "} "); 
-                }
-                Console.WriteLine();
+                foreach (var i in adj[j])
+                    Console.Write("{" + j + ", " + i + "} ");
             }
+            Console.WriteLine();
         }
 
-        static List<List<KeyValuePair<int, int>>> setupAdj(int n, int m, List<(int from, int to)> corridors,HashSet<int> coinRooms)
+        // adjacency list, n entries for each room. Each entry has a list of possible destinations and a 0 or 1 for a coin
+        static (Dictionary<int,List<int>>,Dictionary<int,List<int>>) setupAdj(int n, int m, List<(int from, int to)> corridors, HashSet<int> coinRooms)
         {
-            List<List<KeyValuePair<int, int>>> adj = new List<List<KeyValuePair<int, int>>>();
-            for (int i = 0; i < n; i++)
-            {
-                adj.Add(new List<KeyValuePair<int, int>>());
-            }
+            Dictionary<int,List<int>> adj = new Dictionary<int,List<int>>();
+            Dictionary<int,List<int>> reverseadj = new Dictionary<int,List<int>>();
+            List<int>[] edges = new List<int>[n+1];
+            List<int>[] revedges = new List<int>[n+1];
+            //adds all destinations to the start indices gotten from the corridor list
             for (int i = 0; i < m; i++)
             {
-                (int,int) edge = corridors[i];
-                int choin = coinRooms.Contains(edge.Item1) ? 1 : 0; // 1 if coin in room 1, 0 otherwise
-                addEdge(adj, edge.Item1, edge.Item2,choin);
+                (int s, int e) = corridors[i];
+                if ((edges[s]==null)) edges[s] = new List<int>();
+                edges[s].Add(e);
+
+                if ((revedges[e]==null)) revedges[e] = new List<int>();
+                revedges[e].Add(s);
             }
-            return adj;
+            for (int i = 1; i < n+1; i++)
+            {
+                adj[i] = edges[i] ?? new List<int>();
+                reverseadj[i] = revedges[i] ?? new List<int>();
+            }
+            return (adj,reverseadj);
         }
-        
+
         static void Main(string[] args)
         {
-            var (n, m, s, corridors, coinRooms,hasChoin) = ParseInput();
-           
-            //entrance in room corridors[0] exit in room corridors[n]
-            // var entrance = ? this is room with number 1
-            //var exit = ? this is room with numberk
-            //Solve(entrance,exit,corridors,coinRooms);
-            List<List<KeyValuePair<int, int>>> adj = setupAdj(n,m,corridors,coinRooms);
-            Console.WriteLine("Adjacency List Representation:");
-            displayAdjList(adj);
+            //parse input as:
+            // n = exit and number of rooms
+            // m = number of corridors
+            // s = number of silver coins
+            // corridors = list of corridors (from, to)
+            // coinRooms = set of rooms with coins
+            var (n, m, s, corridors, coinRooms, hasChoin) = ParseInput();
+            var (adj,revadj) = setupAdj(n, m, corridors, coinRooms);
+            displayAdjList(adj); //TODO remove
             
-            PrintSolution();
-        }   
+            solve(n,m,corridors,coinRooms,adj,revadj);
 
-        static (int n, int m, int s, List<(int from, int to)> corridors, HashSet<int> coinRooms, bool[]) ParseInput()
+            
+        }
+
+        static (int n, int m, int s, List<(int from, int to)> corridors, HashSet<int> coinRooms, bool[] hasCoin) ParseInput()
         {
             // Read first line with n, m, s
             string[] firstLine = Console.ReadLine().Split(' ');
@@ -99,6 +109,7 @@ namespace Dungeon
             int s = int.Parse(firstLine[2]); // number of silver coins
             // Read m lines of corridors
             var corridors = new List<(int from, int to)>();
+
             for (int i = 0; i < m; i++)
             {
                 string[] corridor = Console.ReadLine().Split(' ');
@@ -114,37 +125,207 @@ namespace Dungeon
             return (n, m, s, corridors, coinRooms, hasChoin);
         }
 
-        static void Solve((int from, int to) entrance, (int from, int to) exit, List<(int from, int to)> corridors, HashSet<int> coinRooms)
+        static void solve(int amountOfRooms, int amountOfCorridors, List<(int from, int to)> corridors, HashSet<int> coinRooms, Dictionary<int, List<int>> adj, Dictionary<int, List<int>> revadj)
         {
             // Solve problem
-            bfs(entrance,exit,corridors,coinRooms);
+            // reachability: filter all nodes that are not on a path
+            (Dictionary<int, List<int>> nadj, Dictionary<int, List<int>> nrevadj) = bfs(amountOfRooms, corridors, adj, revadj);
+            // if end and start not connected, return
+            if (!(nadj.ContainsKey(1) && revadj.ContainsKey(amountOfRooms))){
+                Console.WriteLine("0");
+                return; }
+
+            // Find SCC's (turns problem into a DAG)
+            (int[] starttimesG, int[]endtimesG) = dfs(amountOfRooms, corridors, nadj, nrevadj);
+            int adjSCC = processSCC(starttimesG,endtimesG);
+
+            //dynprog through sccs
+            int path = dynprog();
+            PrintSolution();
         }
 
-        static void bfs((int from, int to) entrance, (int from, int to) exit, List<(int from, int to)> corridors, HashSet<int> coinRooms)
+        static int dynprog()
         {
-            //bfs:
-            // Dictionary<int, int> parent = new Dictionary<int, int>();
-            // Queue<int> queue = new Queue<int>();
-            // queue.Enqueue(entrance.from);
-            // parent[entrance.from] = -1;
+            //TODO
+            return 0;
+        }
+
+        static int processSCC(int[] starttimesG, int[]endtimesG)
+        {
+            //TODO 
+            return 0;
+        }
+
+        static (int[], int[]) dfs(int n, List<(int from, int to)> corridors, Dictionary<int, List<int>> adj, Dictionary<int, List<int>> revadj)
+        {
+            bool[] discovered = new bool[n + 1];
+            int[] starttimes = new int[n + 1];
+            int[] endtimes = new int[n + 1];
+            int entrance = 1; // room 1 is the entrance
+            int exit = n; // room n is the exit
+            Stack<int> sortedEndtimes = new Stack<int>();
+            //evt predecesor list
+
+            //do dfs on G to get f[u]
+            int time = 0;
+            for (int i = 1; i < n + 1; i++)
+            {
+                Console.WriteLine("key" + i);
+                if (!discovered[i])
+                {
+                    (time, starttimes, endtimes, sortedEndtimes) = singledfs(adj, i, time, discovered, starttimes, endtimes, sortedEndtimes);
+                }
+            }
+            //now what?
+            time = 0;
+            bool[] revdiscovered = new bool[n + 1];
+            int[] revstarttimes = new int[n + 1];
+            int[] revendtimes = new int[n + 1];
+            while (sortedEndtimes.Count() > 0)
+            {
+                int room = sortedEndtimes.Pop();
+                (time, revstarttimes, revendtimes, _) = singledfs(revadj, room, time, revdiscovered, revstarttimes, revendtimes, new Stack<int>());
+            }
+            //testing:
+            Console.WriteLine("finished dfs 1");//TODO remove
+            foreach (int i in starttimes)
+            { Console.WriteLine(i); }
+            Console.WriteLine("end start, begin end");//TODO remove
+            foreach (int i in endtimes)
+            { Console.WriteLine(i); }
+            Console.WriteLine("finished dfs 2");
+            foreach (int i in revstarttimes)
+            { Console.WriteLine(i); }
+            Console.WriteLine("end start, begin end");//TODO remove
+            foreach (int i in revendtimes)
+            { Console.WriteLine(i); }
             //
-            // while (queue.Count > 0 && !parent.ContainsKey(exit.to))
-            // {
-            //     int state = queue.Dequeue();
-            //     if (graph.ContainsKey(state))
-            //     {
-            //         foreach (var child in graph[state])
-            //         {
-            //             if (!parent.ContainsKey(child) && capacities.GetValueOrDefault((state, child), 0) > 0)
-            //             {
-            //                 parent[child] = state;
-            //                 queue.Enqueue(child);
-            //             }
-            //         }
-            //     }
-            // }
-            // Print shortest path
+            return (revstarttimes, revendtimes);
+        }
+
+        static (int,int[],int[],Stack<int>) singledfs(Dictionary<int, List<int>> adj, int room, int time, bool[] discovered, int[] starttimes, int[] endtimes, Stack<int> sortedEndtimes)
+        {
+            time += 1;
+            discovered[room] = true;
+            starttimes[room] = time;
             
+            if (adj.ContainsKey(room) && adj[room].Count > 0)
+            {
+                foreach (int destination in adj[room])
+                {
+                    if (!(discovered[destination] == true))
+                    {
+                        //evt predecesor recorden
+                        (time, starttimes, endtimes,sortedEndtimes) = singledfs(adj, destination, time, discovered, starttimes, endtimes, sortedEndtimes);
+                    }
+                }
+            }
+            time += 1;
+            endtimes[room] = time;
+            sortedEndtimes.Push(room);
+            return (time, starttimes, endtimes,sortedEndtimes);
+        }
+
+        static (Dictionary<int, List<int>>, Dictionary<int, List<int>>) bfs(int n, List<(int from, int to)> corridors, Dictionary<int, List<int>> adj, Dictionary<int, List<int>> revadj)
+        {
+            bool[] canReachFromStart = new bool[n + 1];
+            bool[] canReachEnd = new bool[n + 1];
+            int entrance = 1; // room 1 is the entrance
+            int exit = n; // room n is the exit
+
+            // BFS from start
+            //bool[] seen = new bool[n];
+            Queue<int> queue = new Queue<int>();
+            queue.Enqueue(entrance);
+            //seen[0] = true;
+            canReachFromStart[1] = true;
+            while (queue.Count > 0)
+            {
+                int room = queue.Dequeue();
+                Console.WriteLine("room" + room);
+
+                canReachFromStart[room] = true;
+                if (adj.ContainsKey(room) && adj[room] != null && adj[room].Count > 0)
+                {
+
+                    foreach (int destination in adj[room])
+                    {
+                        Console.WriteLine("adj" + destination);
+                        if (!(canReachFromStart[destination] == true))
+                        {
+                            queue.Enqueue(destination);
+                        }
+                    }
+                }
+            }
+
+
+            // BFS from end
+            queue.Clear();
+            queue.Enqueue(exit);
+            //seen[0] = true;
+            canReachEnd[n] = true;
+            while (queue.Count > 0)
+            {
+                int room = queue.Dequeue();
+                if (revadj.ContainsKey(room) && revadj[room] != null && revadj[room].Count > 0)
+                {
+                    foreach (int destination in revadj[room])
+                    {
+                        if (!(canReachEnd[destination] == true))
+                        {
+                            canReachEnd[destination] = true;
+                            queue.Enqueue(destination);
+                        }
+                    }
+                }
+            }
+
+            bool[] relevant = new bool[n + 1];  // n is the array length
+            for (int i = 0; i < n + 1; i++)
+            {
+                relevant[i] = canReachFromStart[i] && canReachEnd[i];
+                if (!relevant[i])
+                {
+                    if (adj.ContainsKey(i))
+                    {
+                        adj.Remove(i);
+                    }
+                    if (revadj.ContainsKey(i))
+                    {
+                        revadj.Remove(i);
+                    }
+                }
+            }
+            foreach (int i in adj.Keys.ToList())
+            {
+                if (adj[i] != null && adj[i].Count > 0)
+                {
+                    adj[i] = adj[i].Where(target => relevant[target]).ToList();
+                }
+            }
+
+            foreach (int i in revadj.Keys.ToList())
+            {
+                if (revadj[i] != null && revadj[i].Count > 0)
+                {
+                    revadj[i] = revadj[i].Where(source => relevant[source]).ToList();
+                }
+            }
+
+            //testing:
+            Console.WriteLine("finished bfs 1");//TODO remove
+            foreach (bool b in canReachFromStart)
+            { Console.WriteLine(b); }
+            Console.WriteLine("finished bfs 2");
+            foreach (bool b in canReachEnd)
+            { Console.WriteLine(b); }
+            Console.WriteLine("relevant nodes:");
+            foreach (bool b in relevant)
+            { Console.WriteLine(b); }
+            return (adj, revadj); //TODO check if these are actually filtered
+            //
+
         }
 
         static void PrintSolution()
@@ -152,6 +333,34 @@ namespace Dungeon
             // Print solution
             Console.WriteLine("end program");
         }
+
+        // static void testSolution()
+        // {
+
+        //     for (int i = 0; i < 10; i++)
+        //     {
+        //         string filepath = $"{ i}.in";
+        //         string[] lines = File.ReadAllLines(filepath);
+        //         var (n, m, s, edges, coins) = ParseInput();
+        //         foreach l in lines)
+        //         {
+        //             Console.WriteLine(l);
+        //         }
+                
+        //     }
+
+        //     string[] lines = File.ReadAllLines(filepath);
+
+        //     var (n, m, s, edges, coins, hasCoin) = Parser.ParseInput(lines);
+        //     var result = solve(n, m, s, edges, coins, hasCoin);
+        //     Assert.Equal(4, n);
+        //     Assert.Equal(4, m);
+        //     Assert.Equal(2, s);
+        //     Assert.Equal((1, 2), edges[0]);
+        //     Assert.Contains(4, coins);
+
+        //     Console.WriteLine("start test");
+        // }
     }
  
 }
