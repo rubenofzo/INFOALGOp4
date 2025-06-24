@@ -37,6 +37,7 @@ namespace Dungeon
 {
     using System;
     using System.Collections.Generic;
+    using System.Reflection;
     using System.Security.Cryptography.X509Certificates;
 
     class Program
@@ -59,7 +60,7 @@ namespace Dungeon
         }
 
         // adjacency list, n entries for each room. Each entry has a list of possible destinations and a 0 or 1 for a coin
-        static (Dictionary<int,List<int>>,Dictionary<int,List<int>>) setupAdj(int n, int m, List<(int from, int to)> corridors, HashSet<int> coinRooms)
+        static (Dictionary<int,List<int>>,Dictionary<int,List<int>>) setupAdj(int n, int m, List<(int from, int to)> corridors)
         {
             Dictionary<int,List<int>> adj = new Dictionary<int,List<int>>();
             Dictionary<int,List<int>> reverseadj = new Dictionary<int,List<int>>();
@@ -69,11 +70,13 @@ namespace Dungeon
             for (int i = 0; i < m; i++)
             {
                 (int s, int e) = corridors[i];
-                if ((edges[s]==null)) edges[s] = new List<int>();
-                edges[s].Add(e);
-
-                if ((revedges[e]==null)) revedges[e] = new List<int>();
-                revedges[e].Add(s);
+                if (s != e)
+                {
+                    if (edges[s] == null) edges[s] = new List<int>();
+                    edges[s].Add(e);
+                    if (revedges[e] == null) revedges[e] = new List<int>();
+                    revedges[e].Add(s);
+                }
             }
             for (int i = 1; i < n+1; i++)
             {
@@ -92,7 +95,7 @@ namespace Dungeon
             // corridors = list of corridors (from, to)
             // coinRooms = set of rooms with coins
             var (n, m, s, corridors, coinRooms, hasChoin) = ParseInput();
-            var (adj,revadj) = setupAdj(n, m, corridors, coinRooms);
+            var (adj,revadj) = setupAdj(n, m, corridors);
             displayAdjList(adj); //TODO remove
             
             solve(n,m,corridors,coinRooms,adj,revadj);
@@ -136,27 +139,134 @@ namespace Dungeon
                 return; }
 
             // Find SCC's (turns problem into a DAG)
-            (int[] starttimesG, int[]endtimesG) = dfs(amountOfRooms, corridors, nadj, nrevadj);
-            int adjSCC = processSCC(starttimesG,endtimesG);
-
+            (int[] starttimesG, int[]endtimesG,List<int> ts) = findSCC(amountOfRooms, corridors, nadj, nrevadj);
+            (Dictionary<int, List<int>> adjSCC,int[]coinsSCC) = processSCC(corridors,starttimesG,endtimesG,amountOfRooms,amountOfCorridors,coinRooms);
             //dynprog through sccs
-            int path = dynprog();
+            int path = SSSP(ts,adjSCC);
             PrintSolution();
         }
 
-        static int dynprog()
+        static int SSSP(List<int> ts,Dictionary<int, List<int>> adjSCC)
         {
-            //TODO
+            //topological sort //note that its bacckward from the slides, so indice n is the first one on which we edit :)
+            foreach (int i in ts)
+            {
+                Console.WriteLine(i);
+            }
+            //dyn prog
+            //for all incoming edges (u,v)
+            //if d(v) > d (u) + w(u,v)
+            //then d(v) = d(u) + w(u,v) pred(v) = u
+            int sccStart = //This is still 1?
+            int sccEnd = //TODO make sure end is kept
+
+
+            var dp = new Dictionary<int, int>();
+            foreach (var scc in adjSCC.Keys)
+                dp[scc] = int.MinValue;
+            dp[sccStart] = coinsInSCC.ContainsKey(sccStart) ? coinsInSCC[sccStart] : 0;
+
+            foreach (var scc in topo)
+            {
+                if (!adjSCC.ContainsKey(scc)) continue;
+                foreach (var neighbor in adjSCC[scc])
+                {
+                    int coins = coinsInSCC.ContainsKey(neighbor) ? coinsInSCC[neighbor] : 0;
+                    if (dp[scc] + coins > dp[neighbor])
+                        dp[neighbor] = dp[scc] + coins;
+                }
+            }
+
+            int min = dp[sccEnd] == int.MinValue ? 0 : dp[sccEnd];
+
             return 0;
         }
-
-        static int processSCC(int[] starttimesG, int[]endtimesG)
+        static (Dictionary<int, List<int>>,HashSet<int>) processSCC(List<(int from, int to)> corridors, int[] gS, int[] gE, int n, int m,HashSet<int>coinrooms)
         {
-            //TODO 
-            return 0;
+            List<List<int>> sccs = formatSCC(gS, gE, n);
+            //now turn the identified nodes into actual nodes 
+            foreach (List<int> scc in sccs)
+            {
+                if (scc.Count > 1)
+                {
+                    int newroom = scc[0];
+                    foreach (int room in scc)
+                    {
+                        corridors = corridors.Select(corridor =>
+                            (
+                                corridor.from == room ? newroom : corridor.from,
+                                corridor.to == room ? newroom : corridor.to
+                            )
+                        ).ToList();
+                    }
+                }
+            }
+            foreach ((int i, int j) in corridors)
+            { Console.Write("{" + i + " " + j + "} "); }
+
+            var (newAdj, _) = setupAdj(n, m, corridors);
+            Console.WriteLine();
+            displayAdjList(newAdj);
+
+            //TODO coinrooms
+            
+
+            return newAdj;
         }
 
-        static (int[], int[]) dfs(int n, List<(int from, int to)> corridors, Dictionary<int, List<int>> adj, Dictionary<int, List<int>> revadj)
+        static List<List<int>> formatSCC(int[] gS, int[] gE, int n)
+        {
+            int i = 0;
+            List<List<int>> sccs = new List<List<int>>();
+
+            Console.WriteLine("lenght of input" + gS.Length);
+            //zip with indices
+            var zipS = gS.Select((value, index) => (index, value)).ToList();
+            var sortS = zipS.OrderBy(pair => pair.value).ToList();
+            var zipE = gE.Select((value, index) => (index, value)).ToList();
+            var sortE = zipE.OrderBy(pair => pair.value).ToList();
+
+            while (i < n)
+            {
+                i += 1;
+                Console.WriteLine("newLoop, i = " + i);
+                if (sortS[i].index == sortE[i].index)
+                {
+                    Console.WriteLine("singleton case:");
+                    //not a loop, singleton
+                    //add to SCC
+                    Console.WriteLine("adding singleton:" + sortS[i].index);
+                    sccs.Add(new List<int> { sortS[i].index });
+                }
+                else
+                {
+                    Console.WriteLine("loop case:");
+                    //is a loop, find out how big it is
+                    int startLoop = i;
+                    List<int> loopNodes = new List<int>();
+                    while (sortS[startLoop].index != sortE[i].index)
+                    {
+
+                        loopNodes.Add(sortS[i].index);
+                        i += 1;
+                        Console.WriteLine("loopin:" + i);
+                    }
+                    loopNodes.Add(sortS[i].index);
+                    //now i points to the mid point of the loop, with sortS[i].index being the final node added to the loop.
+                    sccs.Add(loopNodes);
+                }
+            }
+            Console.WriteLine("scc:" + sccs.Count);
+            foreach (List<int> scc in sccs)
+            {
+                foreach (int j in scc)
+                { Console.Write(j + " "); }
+                Console.WriteLine("\n");
+            }
+            return sccs;
+        }
+
+        static (int[], int[],List<int>) findSCC(int n, List<(int from, int to)> corridors, Dictionary<int, List<int>> adj, Dictionary<int, List<int>> revadj)
         {
             bool[] discovered = new bool[n + 1];
             int[] starttimes = new int[n + 1];
@@ -164,8 +274,9 @@ namespace Dungeon
             int entrance = 1; // room 1 is the entrance
             int exit = n; // room n is the exit
             Stack<int> sortedEndtimes = new Stack<int>();
-            //evt predecesor list
 
+            //we do the topological sort here as were already doing dfs anyway
+            List<int> topologicalSort = new List<int>();
             //do dfs on G to get f[u]
             int time = 0;
             for (int i = 1; i < n + 1; i++)
@@ -173,7 +284,7 @@ namespace Dungeon
                 Console.WriteLine("key" + i);
                 if (!discovered[i])
                 {
-                    (time, starttimes, endtimes, sortedEndtimes) = singledfs(adj, i, time, discovered, starttimes, endtimes, sortedEndtimes);
+                    (time, starttimes, endtimes, sortedEndtimes, discovered,topologicalSort) = singledfs(adj, i, time, discovered, starttimes, endtimes, sortedEndtimes,topologicalSort);
                 }
             }
             //now what?
@@ -184,31 +295,38 @@ namespace Dungeon
             while (sortedEndtimes.Count() > 0)
             {
                 int room = sortedEndtimes.Pop();
-                (time, revstarttimes, revendtimes, _) = singledfs(revadj, room, time, revdiscovered, revstarttimes, revendtimes, new Stack<int>());
+                if (!(revdiscovered[room] == true))
+                {
+                    (time, revstarttimes, revendtimes, _, revdiscovered,_) = singledfs(revadj, room, time, revdiscovered, revstarttimes, revendtimes, new Stack<int>(),new List<int>());
+                }
             }
+            
+
+
             //testing:
-            Console.WriteLine("finished dfs 1");//TODO remove
+            Console.WriteLine("finished dfs 1");
             foreach (int i in starttimes)
             { Console.WriteLine(i); }
-            Console.WriteLine("end start, begin end");//TODO remove
+            Console.WriteLine("end start, begin end");
             foreach (int i in endtimes)
             { Console.WriteLine(i); }
             Console.WriteLine("finished dfs 2");
             foreach (int i in revstarttimes)
             { Console.WriteLine(i); }
-            Console.WriteLine("end start, begin end");//TODO remove
+            Console.WriteLine("end start, begin end");
             foreach (int i in revendtimes)
             { Console.WriteLine(i); }
             //
-            return (revstarttimes, revendtimes);
+            return (revstarttimes, revendtimes,topologicalSort);
         }
 
-        static (int,int[],int[],Stack<int>) singledfs(Dictionary<int, List<int>> adj, int room, int time, bool[] discovered, int[] starttimes, int[] endtimes, Stack<int> sortedEndtimes)
+        //note to self, ref exists, sadly i found out too late about this so now the code is ugly :(
+        static (int, int[], int[], Stack<int>, bool[], List<int>) singledfs(Dictionary<int, List<int>> adj, int room, int time, bool[] discovered, int[] starttimes, int[] endtimes, Stack<int> sortedEndtimes, List<int> ts)
         {
             time += 1;
             discovered[room] = true;
             starttimes[room] = time;
-            
+
             if (adj.ContainsKey(room) && adj[room].Count > 0)
             {
                 foreach (int destination in adj[room])
@@ -216,14 +334,15 @@ namespace Dungeon
                     if (!(discovered[destination] == true))
                     {
                         //evt predecesor recorden
-                        (time, starttimes, endtimes,sortedEndtimes) = singledfs(adj, destination, time, discovered, starttimes, endtimes, sortedEndtimes);
+                        (time, starttimes, endtimes, sortedEndtimes, discovered, ts) = singledfs(adj, destination, time, discovered, starttimes, endtimes, sortedEndtimes,ts);
                     }
                 }
             }
             time += 1;
             endtimes[room] = time;
             sortedEndtimes.Push(room);
-            return (time, starttimes, endtimes,sortedEndtimes);
+            ts.Add(room);
+            return (time, starttimes, endtimes, sortedEndtimes, discovered, ts);
         }
 
         static (Dictionary<int, List<int>>, Dictionary<int, List<int>>) bfs(int n, List<(int from, int to)> corridors, Dictionary<int, List<int>> adj, Dictionary<int, List<int>> revadj)
@@ -294,7 +413,7 @@ namespace Dungeon
                     if (revadj.ContainsKey(i))
                     {
                         revadj.Remove(i);
-                    }
+                    } //TODO also remove the values
                 }
             }
             foreach (int i in adj.Keys.ToList())
@@ -314,7 +433,7 @@ namespace Dungeon
             }
 
             //testing:
-            Console.WriteLine("finished bfs 1");//TODO remove
+            Console.WriteLine("finished bfs 1");
             foreach (bool b in canReachFromStart)
             { Console.WriteLine(b); }
             Console.WriteLine("finished bfs 2");
@@ -323,7 +442,7 @@ namespace Dungeon
             Console.WriteLine("relevant nodes:");
             foreach (bool b in relevant)
             { Console.WriteLine(b); }
-            return (adj, revadj); //TODO check if these are actually filtered
+            return (adj, revadj); //TODO check if these are actually filtered, answer is no
             //
 
         }
