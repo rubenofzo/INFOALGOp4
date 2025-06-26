@@ -58,13 +58,13 @@ namespace Dungeon
             }
             Console.WriteLine();
         }
-        static void displayTable(Dictionary<int,List<(int,int)>> adj)
+        static void displayTable(Dictionary<int,(int,int)> table)
         {
             
-            foreach (var j in adj.Keys)
+            foreach (int j in table.Keys)
             {
-                foreach (var i in adj[j])
-                    Console.Write("{" + j + ", " + i + "} ");
+                (int a, int b) = table[j];
+                Console.Write(j + ": {" + a + ", " + b + "} ");
             }
             Console.WriteLine();
         }
@@ -133,7 +133,7 @@ namespace Dungeon
             // Read last line with coin locations
             string[] coinLine = Console.ReadLine().Split(' ');
             List<int> parsedCoinLine = coinLine.Select(int.Parse).ToList();
-            int[] coinRooms = new int[n];
+            int[] coinRooms = new int[n+1];
 
             foreach (int i in parsedCoinLine)
             {
@@ -152,17 +152,39 @@ namespace Dungeon
             // if end and start not connected, return
             if (!(nadj.ContainsKey(1) && revadj.ContainsKey(amountOfRooms))){
                 Console.WriteLine("0");
+                Console.WriteLine();
                 return; }
 
             // Find SCC's (turns problem into a DAG)
             (int[] starttimesG, int[]endtimesG,List<int> ts) = findSCC(amountOfRooms, corridors, nadj, nrevadj);
-            (Dictionary<int, List<int>> adjSCC,List<int>> revadjSCC,int[]coinrooms) = processSCC(corridors,starttimesG,endtimesG,amountOfRooms,amountOfCorridors,coinRooms);
+            (Dictionary<int, List<int>> adjSCC,Dictionary<int, List<int>> revadjSCC,int[]coinrooms) = processSCC(corridors,starttimesG,endtimesG,amountOfRooms,amountOfCorridors,coinRooms);
             //dynprog through sccs
-            int path = SSSP(ts,adjSCC,revadjSCC,amountOfRooms,coinrooms);
-            PrintSolution();
+            Dictionary<int, (int, int)>  distanceTable = SSSP(ts,adjSCC,revadjSCC,amountOfRooms,coinrooms);
+            PrintSolution(distanceTable,amountOfRooms);
+        }
+        static void PrintSolution(Dictionary<int, (int, int)> table, int n)
+        {
+            int totalCoin = 0;
+            List<int> path = new List<int>(n);
+            int current = n;
+            while (current != 1)
+            {
+                (int coin, int pred) = table[current];
+                totalCoin += coin;
+                path.Add(pred);
+                current = pred;
+                if (current == 0){ return; }
+            }
+            (int startcoin, int start) = table[current];
+            totalCoin += startcoin;
+            path.Add(start);
+            // Print solution
+
+            Console.WriteLine(totalCoin);
+            Console.WriteLine(string.Join(" ", path));
         }
 
-        static int SSSP(List<int> ts,Dictionary<int, List<int>> adjSCC, Dictionary<int, List<int>> revadjSCC, int n,int[]coinrooms)
+        static Dictionary<int, (int, int)> SSSP(List<int> ts, Dictionary<int, List<int>> adjSCC, Dictionary<int, List<int>> revadjSCC, int n, int[] coinrooms)
         {
             //topological sort //note that its bacckward from the slides, so indice n is the first one on which we edit :)
             ts.Reverse(); //nvm
@@ -174,36 +196,43 @@ namespace Dungeon
             //for all incoming edges (u,v)
             //if d(v) > d (u) + w(u,v)
             //then d(v) = d(u) + w(u,v) pred(v) = u
-            int sccStart = 1; //This is still 1?
-            int sccEnd = n;// make sure end is kept
 
             //we keep a dictionary per node of the cheapest distance to all neighbours
-            Dictionary<int, (int, int)> distanceTable = new Dictionary<int,  (int, int)>();
+            Dictionary<int, (int, int)> distanceTable = new Dictionary<int, (int, int)>();
             //an entry is amount of coins + predecesor, for one this is 0 to signal the end
-            distanceTable[1] = (0, 0);
-
+            //distanceTable[1] = (coinrooms[1], 0);
+            foreach (int room in ts)
+            {
+                Console.WriteLine("room: " + room);
+                var entry = (coinrooms[room], room);
+                distanceTable[room] = entry;
+            }
             foreach (int room in ts) //for each v in topo order
             {
                 if (room == 1) { break; }
-                (int, int) bestOption = (0, 0);
+                (int, int) bestOption = distanceTable[room];
+                int ownCoin = bestOption.Item1;
                 foreach (int incoming in revadjSCC[room]) //we get the incoming edges
                 {
-                    bestOption = grabBestOption(bestOption,incoming)
+                    bestOption = grabBestOption(bestOption, incoming, distanceTable, ownCoin);
                 }
                 distanceTable[room] = bestOption;
             }
             displayTable(distanceTable);
-            return 0;
+
+            return distanceTable;
         }
-        static (int,int) grabBestOption((int,int)bestOption,int incoming) {
+        static (int, int) grabBestOption((int, int) bestOption, int incoming, Dictionary<int, (int, int)> distanceTable, int ownCoin)
+        {
             (int mostCoin, int bestPredecesor) = bestOption;
             //get the new coin
-            
-            
-            return (mostCoin, bestPredecesor);   
+            (int contenderCoin, int via) = distanceTable[incoming];
+            if (contenderCoin + ownCoin > mostCoin)
+            { return (contenderCoin + ownCoin, incoming); }
+            else return bestOption;
         }
 
-        static (Dictionary<int, List<int>>, int[]) processSCC(List<(int from, int to)> corridors, int[] gS, int[] gE, int n, int m, int[] coinrooms)
+        static (Dictionary<int, List<int>>,Dictionary<int, List<int>>, int[]) processSCC(List<(int from, int to)> corridors, int[] gS, int[] gE, int n, int m, int[] coinrooms)
         {
             List<List<int>> sccs = formatSCC(gS, gE, n);
             //now turn the identified nodes into actual nodes 
@@ -228,10 +257,10 @@ namespace Dungeon
             foreach ((int i, int j) in corridors)
             { Console.Write("{" + i + " " + j + "} "); }
 
-            var (newAdj, _) = setupAdj(n, m, corridors);
+            var (newAdj, newrevAdj) = setupAdj(n, m, corridors);
             Console.WriteLine();
             displayAdjList(newAdj);
-            return (newAdj, coinrooms);
+            return (newAdj, newrevAdj,coinrooms);
         }
 
         static List<List<int>> formatSCC(int[] gS, int[] gE, int n)
@@ -467,11 +496,7 @@ namespace Dungeon
 
         }
 
-        static void PrintSolution()
-        {
-            // Print solution
-            Console.WriteLine("end program");
-        }
+        
 
         // static void testSolution()
         // {
