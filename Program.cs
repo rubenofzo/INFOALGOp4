@@ -1,6 +1,4 @@
-﻿
-
-namespace Dungeon
+﻿namespace Dungeon
 {
     using System;
     using System.Collections.Generic;
@@ -99,8 +97,6 @@ namespace Dungeon
             
         }
 
-
-
         static void solve(int amountOfRooms, int amountOfCorridors, List<(int from, int to)> corridors, int[] coinRooms, Dictionary<int, List<int>> adj, Dictionary<int, List<int>> revadj)
         {
             // Solve problem
@@ -116,8 +112,32 @@ namespace Dungeon
             (int[] starttimesG, int[]endtimesG,List<int> ts) = findSCC(amountOfRooms, corridors, nadj, nrevadj);
             (Dictionary<int, List<int>> adjSCC,Dictionary<int, List<int>> revadjSCC,int[]coinrooms,var sccToRoom) = processSCC(corridors,starttimesG,endtimesG,amountOfRooms,amountOfCorridors,coinRooms);
             //dynprog through sccs
-            Dictionary<int, (int, int)>  distanceTable = SSSP(ts,adjSCC,revadjSCC,amountOfRooms,coinrooms);
+            List<int> _ts = topoLogicalSort(adjSCC,amountOfRooms);
+            Dictionary<int, (int, int)>  distanceTable = SSSP(_ts,adjSCC,revadjSCC,amountOfRooms,coinrooms);
             PrintSolution(distanceTable,amountOfRooms,sccToRoom);
+        }
+
+        static List<int> topoLogicalSort(Dictionary<int, List<int>> adj, int n)
+        {
+            bool[] discovered = new bool[n + 1];
+            int[] starttimes = new int[n + 1];
+            int[] endtimes = new int[n + 1];
+            Stack<int> sortedEndtimes = new Stack<int>();
+
+            //we do the topological sort here as were already doing dfs anyway
+            List<int> ts= new List<int>();
+            //do dfs on G to get f[u]
+            int time = 0;
+            for (int i = 1; i < n + 1; i++)
+            {
+                //Console.WriteLine("key" + i);
+                if (!discovered[i])
+                {
+                    (time, starttimes, endtimes, sortedEndtimes, discovered, ts) = singledfs(adj, i, time, discovered, starttimes, endtimes, sortedEndtimes, ts);
+                }
+            }
+            ts.Reverse();
+            return ts;
         }
         static void PrintSolution(Dictionary<int, (int, int)> table, int n, Dictionary<int, List<int>> sccToRoom)
         {
@@ -138,7 +158,7 @@ namespace Dungeon
                 //we store the predecesor already
                 (int coin, int predecessor) = table[current];
                 //we get the actual path from the SCC reverse table
-               //List<int> sccPath = sccToRoom[current];
+                //List<int> sccPath = sccToRoom[current];
                 if (coin > 0 && sccToRoom.ContainsKey(current)) // Only add SCCs with coins
                 {
                     sccPath.Add(current);
@@ -175,7 +195,7 @@ namespace Dungeon
         static Dictionary<int, (int, int)> SSSP(List<int> ts, Dictionary<int, List<int>> adjSCC, Dictionary<int, List<int>> revadjSCC, int n, int[] coinrooms)
         {
             
-            ts.Reverse(); //topological sort
+            
             // foreach (int i in ts)
             // {
             //     Console.WriteLine(i);
@@ -235,10 +255,10 @@ namespace Dungeon
             Dictionary<int, int> roomToSCC = new Dictionary<int, int>();
             Dictionary<int, List<int>> SCCtorooms = new Dictionary<int, List<int>>(); //for printing the cycle later
             int[] newCoinrooms = new int[n + 1];
-            
+
             foreach (List<int> scc in sccs)
             {
-                
+
                 //ensures room 1 stays room 1 and the final room remains the final one
                 int representative;
                 if (scc.Contains(1))
@@ -249,18 +269,23 @@ namespace Dungeon
                     representative = scc.Min();
 
                 SCCtorooms[representative] = new List<int>();
-                
-                // Sum all coins in this SCC
-                int totalCoins = scc.Sum(room => coinrooms[room]);
-                newCoinrooms[representative] = totalCoins;
 
-                // Map all rooms in SCC to representative
+                int totalCoins = 0;
+
                 foreach (int room in scc)
                 {
                     roomToSCC[room] = representative;
-                    if (coinrooms[room] == 1 ){
+                    totalCoins += coinrooms[room];
+                    if (coinrooms[room] == 1)
+                    {
                         SCCtorooms[representative].Add(room);
-                    } }
+                    }
+                }
+
+                newCoinrooms[representative] = totalCoins;
+                
+
+
             }
             
             // Update corridors
@@ -268,19 +293,18 @@ namespace Dungeon
                 .Select(corridor => (
                     roomToSCC.GetValueOrDefault(corridor.from, corridor.from),
                     roomToSCC.GetValueOrDefault(corridor.to, corridor.to)
-                ))
-                .Where(corridor => corridor.Item1 != corridor.Item2).Distinct() // Remove duplicates
+                )) //we remove duplicates in setting up the adj
                 .ToList();
-            
+
             // Build new adjacency lists
-            var (newAdj, newRevAdj) = setupAdj(n, newCorridors.Count, newCorridors);
-            
+                //Console.WriteLine(string.Join(" ", corridors));
+                //Console.WriteLine(string.Join(" ", newCorridors));
+                var (newAdj, newRevAdj) = setupAdj(n, newCorridors.Count(), newCorridors);
             return (newAdj, newRevAdj, newCoinrooms, SCCtorooms);
         }
 
         static List<List<int>> formatSCC(int[] gS, int[] gE, int n)
         {
-            
             int i = 0;
             List<List<int>> sccs = new List<List<int>>();
 
@@ -336,8 +360,6 @@ namespace Dungeon
             bool[] discovered = new bool[n + 1];
             int[] starttimes = new int[n + 1];
             int[] endtimes = new int[n + 1];
-            int entrance = 1; // room 1 is the entrance
-            int exit = n; // room n is the exit
             Stack<int> sortedEndtimes = new Stack<int>();
 
             //we do the topological sort here as were already doing dfs anyway
@@ -365,7 +387,7 @@ namespace Dungeon
                     (time, revstarttimes, revendtimes, _, revdiscovered,_) = singledfs(revadj, room, time, revdiscovered, revstarttimes, revendtimes, new Stack<int>(),new List<int>());
                 }
             }
-            
+            topologicalSort.Reverse();
 
 
             //testing:
