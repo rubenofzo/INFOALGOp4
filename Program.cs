@@ -50,13 +50,14 @@ namespace Dungeon
 
         static void displayAdjList(Dictionary<int,List<int>> adj)
         {
-            
+
             foreach (var j in adj.Keys)
             {
                 foreach (var i in adj[j])
-                    Console.Write("{" + j + ", " + i + "} ");
+                    continue;
+                    //Console.Write("{" + j + ", " + i + "} ");
             }
-            Console.WriteLine();
+            //Console.WriteLine();
         }
         static void displayTable(Dictionary<int,(int,int)> table)
         {
@@ -64,9 +65,9 @@ namespace Dungeon
             foreach (int j in table.Keys)
             {
                 (int a, int b) = table[j];
-                Console.Write(j + ": {" + a + ", " + b + "} ");
+                //Console.Write(j + ": {" + a + ", " + b + "} ");
             }
-            Console.WriteLine();
+            //Console.WriteLine();
         }
 
         // adjacency list, n entries for each room. Each entry has a list of possible destinations and a 0 or 1 for a coin
@@ -151,47 +152,78 @@ namespace Dungeon
             (Dictionary<int, List<int>> nadj, Dictionary<int, List<int>> nrevadj) = bfs(amountOfRooms, corridors, adj, revadj);
             // if end and start not connected, return
             if (!(nadj.ContainsKey(1) && revadj.ContainsKey(amountOfRooms))){
-                Console.WriteLine("0");
-                Console.WriteLine();
-                return; }
+               Console.WriteLine("0");
+               Console.WriteLine();
+               return; }
 
             // Find SCC's (turns problem into a DAG)
-            (int[] starttimesG, int[]endtimesG,List<int> ts) = findSCC(amountOfRooms, corridors, nadj, nrevadj);
-            (Dictionary<int, List<int>> adjSCC,Dictionary<int, List<int>> revadjSCC,int[]coinrooms) = processSCC(corridors,starttimesG,endtimesG,amountOfRooms,amountOfCorridors,coinRooms);
+            (int[] starttimesG, int[]endtimesG,List<int> ts) = findSCC(amountOfRooms, corridors, adj, revadj);
+            (Dictionary<int, List<int>> adjSCC,Dictionary<int, List<int>> revadjSCC,int[]coinrooms,var sccToRoom) = processSCC(corridors,starttimesG,endtimesG,amountOfRooms,amountOfCorridors,coinRooms);
             //dynprog through sccs
             Dictionary<int, (int, int)>  distanceTable = SSSP(ts,adjSCC,revadjSCC,amountOfRooms,coinrooms);
-            PrintSolution(distanceTable,amountOfRooms);
+            PrintSolution(distanceTable,amountOfRooms,sccToRoom);
         }
-        static void PrintSolution(Dictionary<int, (int, int)> table, int n)
+        static void PrintSolution(Dictionary<int, (int, int)> table, int n, Dictionary<int, List<int>> sccToRoom)
         {
-            int totalCoin = 0;
-            List<int> path = new List<int>(n);
-            int current = n;
-            while (current != 1)
+            //Console.WriteLine("solution");
+            displayAdjList(sccToRoom);
+            if (!table.ContainsKey(n) || table[n].Item1 == int.MinValue)
             {
-                (int coin, int pred) = table[current];
-                totalCoin += coin;
-                path.Add(pred);
-                current = pred;
-                if (current == 0){ return; }
+                Console.WriteLine("0");
+                Console.WriteLine();
+                return;
             }
-            (int startcoin, int start) = table[current];
-            totalCoin += startcoin;
-            path.Add(start);
+            (int totalCoin, int pred) = table[n];
+            Console.WriteLine(totalCoin);
+            List<int> sccPath = new List<int>(n);
+            int current = n;
+            while (current != 0 && table.ContainsKey(current))
+            {
+                //we store the predecesor already
+                (int coin, int predecessor) = table[current];
+                //we get the actual path from the SCC reverse table
+               //List<int> sccPath = sccToRoom[current];
+                if (coin > 0 && sccToRoom.ContainsKey(current)) // Only add SCCs with coins
+                {
+                    sccPath.Add(current);
+                }
+                current = predecessor;
+                if (current == 0) { break; }
+            }
+            sccPath.Reverse();
             // Print solution
 
-            Console.WriteLine(totalCoin);
-            Console.WriteLine(string.Join(" ", path));
+            List<int> path = new List<int>();
+            foreach (int sccRep in sccPath)
+            {
+                if (sccToRoom.ContainsKey(sccRep))
+                {
+                    // Add all original rooms with coins from this SCC
+                    // Sort them to ensure consistent output
+                    var roomsInSCC = sccToRoom[sccRep].OrderBy(x => x).ToList();
+                    path.AddRange(roomsInSCC);
+                }
+            }
+
+            if (sccPath.Count > 0)
+            {
+                Console.WriteLine(string.Join(" ", path));
+            }
+            else
+            {
+                Console.WriteLine();
+            }
+            // everyting works but i now need to get the actual path instead of the SCC placeholder paths.
         }
 
         static Dictionary<int, (int, int)> SSSP(List<int> ts, Dictionary<int, List<int>> adjSCC, Dictionary<int, List<int>> revadjSCC, int n, int[] coinrooms)
         {
-            //topological sort //note that its bacckward from the slides, so indice n is the first one on which we edit :)
-            ts.Reverse(); //nvm
-            foreach (int i in ts)
-            {
-                Console.WriteLine(i);
-            }
+            
+            ts.Reverse(); //topological sort
+            // foreach (int i in ts)
+            // {
+            //     Console.WriteLine(i);
+            // }
             //dyn prog
             //for all incoming edges (u,v)
             //if d(v) > d (u) + w(u,v)
@@ -203,72 +235,100 @@ namespace Dungeon
             //distanceTable[1] = (coinrooms[1], 0);
             foreach (int room in ts)
             {
-                Console.WriteLine("room: " + room);
-                var entry = (coinrooms[room], room);
+                var entry = (int.MinValue, -1);
                 distanceTable[room] = entry;
             }
-            foreach (int room in ts) //for each v in topo order
+            if (distanceTable.ContainsKey(1))
             {
-                if (room == 1) { break; }
-                (int, int) bestOption = distanceTable[room];
-                int ownCoin = bestOption.Item1;
-                foreach (int incoming in revadjSCC[room]) //we get the incoming edges
-                {
-                    bestOption = grabBestOption(bestOption, incoming, distanceTable, ownCoin);
-                }
-                distanceTable[room] = bestOption;
+                distanceTable[1] = (coinrooms[1], 0); // 0 is start node
             }
-            displayTable(distanceTable);
-
-            return distanceTable;
-        }
-        static (int, int) grabBestOption((int, int) bestOption, int incoming, Dictionary<int, (int, int)> distanceTable, int ownCoin)
-        {
-            (int mostCoin, int bestPredecesor) = bestOption;
-            //get the new coin
-            (int contenderCoin, int via) = distanceTable[incoming];
-            if (contenderCoin + ownCoin > mostCoin)
-            { return (contenderCoin + ownCoin, incoming); }
-            else return bestOption;
-        }
-
-        static (Dictionary<int, List<int>>,Dictionary<int, List<int>>, int[]) processSCC(List<(int from, int to)> corridors, int[] gS, int[] gE, int n, int m, int[] coinrooms)
-        {
-            List<List<int>> sccs = formatSCC(gS, gE, n);
-            //now turn the identified nodes into actual nodes 
-            foreach (List<int> scc in sccs)
+            foreach (int room in ts)
             {
-                if (scc.Count > 1)
+                if (!distanceTable.ContainsKey(room)) continue;
+
+                (int currentCoins, int pred) = distanceTable[room];
+
+                if (currentCoins == int.MinValue && room != 1) continue; //unreachable
+
+                // Update through all outgoing edges, the incoming ones for the neighbours
+                if (adjSCC.ContainsKey(room))
                 {
-                    int newroom = scc[0] == 1 ? 1 : scc.Max(); //ensures room 1 stays room 1 and the final room remains the final one, techniqallly could lead to O(n*n)??
-                    int newcoin = scc.Sum(i => coinrooms[i]);
-                    foreach (int room in scc)
+                    foreach (int neighbor in adjSCC[room])
                     {
-                        corridors = corridors.Select(corridor =>
-                            (
-                                corridor.from == room ? newroom : corridor.from,
-                                corridor.to == room ? newroom : corridor.to
-                            )
-                        ).ToList();
-                        coinrooms[newroom] = room == newroom ? newcoin : 0;  //we dont leave the old coin in place, those nodes should not be accesed anyway but for safety
+                        if (!distanceTable.ContainsKey(neighbor)) continue;
+                        int newCoinCount = currentCoins + coinrooms[neighbor];
+                        (int neighborCoins, int neighborPred) = distanceTable[neighbor];
+
+                        // Update if we found a better path
+                        if (newCoinCount > neighborCoins)
+                        {
+                            distanceTable[neighbor] = (newCoinCount, room);
+                        }
                     }
                 }
             }
-            foreach ((int i, int j) in corridors)
-            { Console.Write("{" + i + " " + j + "} "); }
+            displayAdjList(adjSCC);
+            displayTable(distanceTable);
 
-            var (newAdj, newrevAdj) = setupAdj(n, m, corridors);
-            Console.WriteLine();
-            displayAdjList(newAdj);
-            return (newAdj, newrevAdj,coinrooms);
+            return distanceTable;
+            }
+
+        static (Dictionary<int, List<int>>,Dictionary<int, List<int>>, int[],Dictionary<int, List<int>>) processSCC(List<(int from, int to)> corridors, int[] gS, int[] gE, int n, int m, int[] coinrooms)
+        {
+            List<List<int>> sccs = formatSCC(gS, gE, n);
+            Dictionary<int, int> roomToSCC = new Dictionary<int, int>();
+            Dictionary<int, List<int>> SCCtorooms = new Dictionary<int, List<int>>(); //for printing the cycle later
+            int[] newCoinrooms = new int[n + 1];
+            
+            foreach (List<int> scc in sccs)
+            {
+                
+                //ensures room 1 stays room 1 and the final room remains the final one
+                int representative;
+                if (scc.Contains(1))
+                    representative = 1;
+                else if (scc.Contains(n))
+                    representative = n;
+                else
+                    representative = scc.Min();
+
+                SCCtorooms[representative] = new List<int>();
+                
+                // Sum all coins in this SCC
+                int totalCoins = scc.Sum(room => coinrooms[room]);
+                newCoinrooms[representative] = totalCoins;
+
+                // Map all rooms in SCC to representative
+                foreach (int room in scc)
+                {
+                    roomToSCC[room] = representative;
+                    if (coinrooms[room] == 1 ){
+                        SCCtorooms[representative].Add(room);
+                    } }
+            }
+            
+            // Update corridors
+            var newCorridors = corridors
+                .Select(corridor => (
+                    roomToSCC.GetValueOrDefault(corridor.from, corridor.from),
+                    roomToSCC.GetValueOrDefault(corridor.to, corridor.to)
+                ))
+                .Where(corridor => corridor.Item1 != corridor.Item2).Distinct() // Remove duplicates
+                .ToList();
+            
+            // Build new adjacency lists
+            var (newAdj, newRevAdj) = setupAdj(n, newCorridors.Count, newCorridors);
+            
+            return (newAdj, newRevAdj, newCoinrooms, SCCtorooms);
         }
 
         static List<List<int>> formatSCC(int[] gS, int[] gE, int n)
         {
+            
             int i = 0;
             List<List<int>> sccs = new List<List<int>>();
 
-            Console.WriteLine("lenght of input" + gS.Length);
+            //Console.WriteLine("lenght of input" + gS.Length);
             //zip with indices
             var zipS = gS.Select((value, index) => (index, value)).ToList();
             var sortS = zipS.OrderBy(pair => pair.value).ToList();
@@ -278,18 +338,18 @@ namespace Dungeon
             while (i < n)
             {
                 i += 1;
-                Console.WriteLine("newLoop, i = " + i);
+                //Console.WriteLine("newLoop, i = " + i);
                 if (sortS[i].index == sortE[i].index)
                 {
-                    Console.WriteLine("singleton case:");
+                    //Console.WriteLine("singleton case:");
                     //not a loop, singleton
                     //add to SCC
-                    Console.WriteLine("adding singleton:" + sortS[i].index);
+                    //Console.WriteLine("adding singleton:" + sortS[i].index);
                     sccs.Add(new List<int> { sortS[i].index });
                 }
                 else
                 {
-                    Console.WriteLine("loop case:");
+                    //Console.WriteLine("loop case:");
                     //is a loop, find out how big it is
                     int startLoop = i;
                     List<int> loopNodes = new List<int>();
@@ -298,20 +358,20 @@ namespace Dungeon
 
                         loopNodes.Add(sortS[i].index);
                         i += 1;
-                        Console.WriteLine("loopin:" + i);
+                        //Console.WriteLine("loopin:" + i);
                     }
                     loopNodes.Add(sortS[i].index);
                     //now i points to the mid point of the loop, with sortS[i].index being the final node added to the loop.
                     sccs.Add(loopNodes);
                 }
             }
-            Console.WriteLine("scc:" + sccs.Count);
-            foreach (List<int> scc in sccs)
-            {
-                foreach (int j in scc)
-                { Console.Write(j + " "); }
-                Console.WriteLine("\n");
-            }
+            // Console.WriteLine("scc:" + sccs.Count);
+            // foreach (List<int> scc in sccs)
+            // {
+            //     foreach (int j in scc)
+            //     { Console.Write(j + " "); }
+            //     Console.WriteLine("\n");
+            // }
             return sccs;
         }
 
@@ -330,7 +390,7 @@ namespace Dungeon
             int time = 0;
             for (int i = 1; i < n + 1; i++)
             {
-                Console.WriteLine("key" + i);
+                //Console.WriteLine("key" + i);
                 if (!discovered[i])
                 {
                     (time, starttimes, endtimes, sortedEndtimes, discovered,topologicalSort) = singledfs(adj, i, time, discovered, starttimes, endtimes, sortedEndtimes,topologicalSort);
@@ -353,18 +413,18 @@ namespace Dungeon
 
 
             //testing:
-            Console.WriteLine("finished dfs 1");
-            foreach (int i in starttimes)
-            { Console.WriteLine(i); }
-            Console.WriteLine("end start, begin end");
-            foreach (int i in endtimes)
-            { Console.WriteLine(i); }
-            Console.WriteLine("finished dfs 2");
-            foreach (int i in revstarttimes)
-            { Console.WriteLine(i); }
-            Console.WriteLine("end start, begin end");
-            foreach (int i in revendtimes)
-            { Console.WriteLine(i); }
+            // Console.WriteLine("finished dfs 1");
+            // foreach (int i in starttimes)
+            // { Console.WriteLine(i); }
+            // Console.WriteLine("end start, begin end");
+            // foreach (int i in endtimes)
+            // { Console.WriteLine(i); }
+            // Console.WriteLine("finished dfs 2");
+            // foreach (int i in revstarttimes)
+            // { Console.WriteLine(i); }
+            // Console.WriteLine("end start, begin end");
+            // foreach (int i in revendtimes)
+            // { Console.WriteLine(i); }
             //
             return (revstarttimes, revendtimes,topologicalSort);
         }
@@ -410,7 +470,7 @@ namespace Dungeon
             while (queue.Count > 0)
             {
                 int room = queue.Dequeue();
-                Console.WriteLine("room" + room);
+                //Console.WriteLine("room" + room);
 
                 canReachFromStart[room] = true;
                 if (adj.ContainsKey(room) && adj[room] != null && adj[room].Count > 0)
@@ -418,7 +478,7 @@ namespace Dungeon
 
                     foreach (int destination in adj[room])
                     {
-                        Console.WriteLine("adj" + destination);
+                        //Console.WriteLine("adj" + destination);
                         if (!(canReachFromStart[destination] == true))
                         {
                             queue.Enqueue(destination);
@@ -481,50 +541,20 @@ namespace Dungeon
                 }
             }
 
-            //testing:
-            Console.WriteLine("finished bfs 1");
-            foreach (bool b in canReachFromStart)
-            { Console.WriteLine(b); }
-            Console.WriteLine("finished bfs 2");
-            foreach (bool b in canReachEnd)
-            { Console.WriteLine(b); }
-            Console.WriteLine("relevant nodes:");
-            foreach (bool b in relevant)
-            { Console.WriteLine(b); }
+            // //testing:
+            // Console.WriteLine("finished bfs 1");
+            // foreach (bool b in canReachFromStart)
+            // { Console.WriteLine(b); }
+            // Console.WriteLine("finished bfs 2");
+            // foreach (bool b in canReachEnd)
+            // { Console.WriteLine(b); }
+            // Console.WriteLine("relevant nodes:");
+            // foreach (bool b in relevant)
+            // { Console.WriteLine(b); }
             return (adj, revadj); //TODO check if these are actually filtered, answer is no
-            //
+            // //
 
         }
-
-        
-
-        // static void testSolution()
-        // {
-
-        //     for (int i = 0; i < 10; i++)
-        //     {
-        //         string filepath = $"{ i}.in";
-        //         string[] lines = File.ReadAllLines(filepath);
-        //         var (n, m, s, edges, coins) = ParseInput();
-        //         foreach l in lines)
-        //         {
-        //             Console.WriteLine(l);
-        //         }
-                
-        //     }
-
-        //     string[] lines = File.ReadAllLines(filepath);
-
-        //     var (n, m, s, edges, coins, hasCoin) = Parser.ParseInput(lines);
-        //     var result = solve(n, m, s, edges, coins, hasCoin);
-        //     Assert.Equal(4, n);
-        //     Assert.Equal(4, m);
-        //     Assert.Equal(2, s);
-        //     Assert.Equal((1, 2), edges[0]);
-        //     Assert.Contains(4, coins);
-
-        //     Console.WriteLine("start test");
-        // }
     }
  
 }
